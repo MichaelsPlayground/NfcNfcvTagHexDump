@@ -34,6 +34,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
@@ -174,7 +175,7 @@ public class MainActivity extends AppCompatActivity implements NfcAdapter.Reader
                 System.out.println("responseTrimLast: " + bytesToHex(responseTrimLast));
 
                 //String dumpContent = dumpContentHeader + "\n\nUser memory content:\n" + HexDumpOwn.prettyPrint(ntagMemory, 16);
-                String dumpContent = HexDumpOwn.prettyPrint(responseTrimFirst, 16);
+                String dumpContent = HexDumpOwn.prettyPrint(responseTrimFirst, 0);
                 writeToUiAppend(readResult, dumpContent);
                 // note: response contains at ther beginning 2 00x bytes (remove) und at the end 2 00x bytes (remove)
 
@@ -183,6 +184,7 @@ public class MainActivity extends AppCompatActivity implements NfcAdapter.Reader
                 int NUMBER_OF_BYTES_IN_BLOCK = 4;
                 byte[] responseComplete = new byte[(NUMBER_OF_BLOCKS * NUMBER_OF_BYTES_IN_BLOCK)];
                 for (int i = 0; i < NUMBER_OF_BLOCKS; i++) {
+                    //byte[] responseBlock = readOneBlockMultiple(nfcV, tagId, i);
                     byte[] responseBlock = readOneBlock(nfcV, tagId, i);
                     if (responseBlock != null) {
                         // copy the new bytes to responseComplete
@@ -195,9 +197,89 @@ public class MainActivity extends AppCompatActivity implements NfcAdapter.Reader
                     }
                 }
                 writeToUiAppend(readResult, "complete content");
-                String dumpComplete = HexDumpOwn.prettyPrint(responseComplete, 16);
+                String dumpComplete = HexDumpOwn.prettyPrint(responseComplete, 0);
                 writeToUiAppend(readResult, dumpComplete);
                 System.out.println("dumpComplete: " + dumpComplete);
+
+                // cardId
+                StringBuilder localStringBuilder = new StringBuilder();
+                byte[] arrayOfByte = tagId;
+                for (int i1 = -1 + arrayOfByte.length; i1 >= 0; i1--)
+                {
+                    Object[] arrayOfObject = new Object[1];
+                    arrayOfObject[0] = Integer.valueOf(0xFF & arrayOfByte[i1]);
+                    localStringBuilder.append(String.format("%02X", arrayOfObject));
+                }
+                BigInteger localBigInteger = new BigInteger(localStringBuilder.toString(), 16);
+                String cardId = "xx-" + localBigInteger.toString() + "-x";
+                writeToUiAppend(readResult, "card-id: " + cardId);
+
+
+                // tag information
+                // https://stackoverflow.com/a/30524444/8166854
+                byte[] infoCmd = new byte[2 + tagId.length];
+                // set "addressed" flag
+                infoCmd[0] = 0x20;
+                // ISO 15693 Get System Information command byte
+                infoCmd[1] = 0x2B;
+                //adding the tag id
+                System.arraycopy(tagId, 0, infoCmd, 2, tagId.length);
+                int memoryBlocks = 0;
+                try {
+                    //nfcV.connect();
+                    byte[] data = nfcV.transceive(infoCmd);
+                    if (data != null) {
+                        writeToUiAppend(readResult, "data from system information command byte: " + bytesToHex(data));
+                        System.out.println("data: " + bytesToHex(data));
+                        // 000fc8504121662416e00200330302
+/*
+data: 000fc8504121662416e00200330302
+      00 status bits, 0x00 = ok
+        0f information flags (0x0f - DFSID, AFI, Mem size & IC ref. shown
+          c8504121662416e0 UID
+                          02 DSFID 0x02
+                            00 AFI 0x00
+                              3303 memory size 0x33 0x03
+                                  02 IC reference 0x02
+    memory size works as follow: 0x33 + 1 is the number of blocks, 0x33 = 51 dec. = 51 + 1 = 52 blocks
+                                 0x03 + 1 is the number of bytes in a block, 0x03 = 3 dec = 3 + 1 = 4 bytes per block
+                                 total memory size: 52 block of 4 bytes each = 208 bytes user memory
+ */
+                    }
+                    memoryBlocks = Integer.parseInt(String.format("%02X", data[data.length-3]), 16);
+                }
+                catch (IOException e) {
+                    e.printStackTrace();
+                }
+/*
+                finally {
+                    try {
+                        nfcV.close();
+                    }
+                    catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                }
+*/
+                writeToUiAppend(readResult,"memoryBlocks: " + memoryBlocks);
+
+                // write one block data to block 11
+                byte[] write_new_data = new byte[]{
+                        (byte) 0x02, (byte) 0x03, (byte) 0x04, (byte) 0x05
+                };
+                /*
+                boolean writeResult = writeOneBlock(nfcV, tagId, 11, write_new_data);
+                writeToUiAppend(readResult, "writeOneBlock new_data result: " + writeResult);
+*/
+
+                byte[] write_old_data = new byte[]{
+                        (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00
+                };
+                /*
+                boolean writeResult = writeOneBlock(nfcV, tagId, 11, write_old_data);
+                writeToUiAppend(readResult, "writeOneBlock old_data result: " + writeResult);
+
+                 */
 
                 // for exporting
                 //tagIdString = bytesToHex(tagId);
@@ -470,6 +552,70 @@ public class MainActivity extends AppCompatActivity implements NfcAdapter.Reader
     }
 
     private byte[] readOneBlock(NfcV nfcV, byte[] tagId, int blockNumber) {
+        byte[] RESPONSE_OK = new byte[]{
+                (byte) 0x00
+        };
+        byte[] cmd = new byte[] {
+                /* FLAGS   */ (byte)0x20,
+                /* COMMAND */ (byte)0x20, // command read single block
+                /* UID     */ (byte)0x00, (byte)0x00, (byte)0x00, (byte)0x00, (byte)0x00, (byte)0x00, (byte)0x00, (byte)0x00,
+                /* OFFSET  */ (byte)0x00
+        };
+        System.arraycopy(tagId, 0, cmd, 2, 8); // copy tagId to UID
+        cmd[10] = (byte)((blockNumber) & 0x0ff); // copy block number
+        try {
+            byte[] response = nfcV.transceive(cmd);
+            //System.out.println("blockNumber: " + blockNumber);
+            //System.out.println("cmd: " + bytesToHex(cmd));
+            System.out.println("response: " + bytesToHex(response));
+            byte[] responseByte = getResponseByte(response);
+            if (Arrays.equals(responseByte, RESPONSE_OK)) {
+                return trimFirstByte(response);
+            } else {
+                return null;
+            }
+        } catch (IOException e) {
+            //throw new RuntimeException(e);
+            return null;
+        }
+    }
+    private boolean writeOneBlock(NfcV nfcV, byte[] tagId, int blockNumber, byte[] fourByteData) {
+        // https://stackoverflow.com/a/40806550/8166854
+        byte[] RESPONSE_OK = new byte[]{
+                (byte) 0x00, (byte) 0x00
+        };
+        byte[] cmd = new byte[] {
+                /* FLAGS   */ (byte)0x20,
+                /* COMMAND */ (byte)0x21, // command write single block
+                /* UID     */ (byte)0x00, (byte)0x00, (byte)0x00, (byte)0x00, (byte)0x00, (byte)0x00, (byte)0x00, (byte)0x00,
+                /* OFFSET  */ (byte)0x00,
+                /* DATA    */ (byte)0x00, (byte)0x00, (byte)0x00, (byte)0x00
+        };
+        System.arraycopy(tagId, 0, cmd, 2, 8); // copy tagId to UID
+        cmd[10] = (byte)((blockNumber) & 0x0ff); // copy block number
+        System.arraycopy(fourByteData, 0, cmd, 11, 4); // copy 4 bytes of data
+        try {
+            byte[] response = nfcV.transceive(cmd);
+            System.out.println("response on writeOneBlock: " + bytesToHex(response));
+            //System.out.println("blockNumber: " + blockNumber);
+            //System.out.println("cmd: " + bytesToHex(cmd));
+            //System.out.println("response: " + bytesToHex(response));
+            byte[] responseByte = getResponseBytes(response);
+            if (Arrays.equals(responseByte, RESPONSE_OK)) {
+                return true;
+            } else {
+                System.out.println("Error on writeOneBlock: " + bytesToHex(response));
+                return false;
+            }
+        } catch (IOException e) {
+            //throw new RuntimeException(e);
+            return false;
+        }
+    }
+
+
+    private byte[] readOneBlockMultiple(NfcV nfcV, byte[] tagId, int blockNumber) {
+        // modified from reading multiple blocks
         // try to read
         int offset = 0;  // offset of first block to read
         int blocks = 1;  // number of blocks to read
