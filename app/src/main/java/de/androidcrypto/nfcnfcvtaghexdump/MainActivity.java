@@ -135,7 +135,6 @@ public class MainActivity extends AppCompatActivity implements NfcAdapter.Reader
                 writeToUiAppend(readResult, "responseInventory: " + responseInventoryString);
                 System.out.println("responseInventory: " + responseInventoryString);
 
-
                 byte[] GetSystemInfoFrame1bytesAddress = new byte[] { (byte) 0x02, (byte) 0x2B };
                 byte[] responseGetSystemInfoFrame1bytesAddress = nfcV.transceive(GetSystemInfoFrame1bytesAddress);
                 String responseGetSystemInfoFrame1bytesAddressString = bytesToHex(responseGetSystemInfoFrame1bytesAddress);
